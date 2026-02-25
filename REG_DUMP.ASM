@@ -1,5 +1,5 @@
 .model tiny
-
+.286 
 .code
 
 org 100h
@@ -7,7 +7,8 @@ org 100h
 centre_offset             equ 5 * 160 + 80
 F12_scancode_press        equ 58h
 F12_scancode_unpress      equ 58h + 80h 
-color                     equ 4eh         
+color                     equ 0ah  
+video_seg                 equ 0b800h      
 
 Start:          mov ax, 3509h
                 int 21h
@@ -33,15 +34,11 @@ Start:          mov ax, 3509h
 
 My09IntFunc     proc
 
-                push ax
-                push di
-                push cx
+                pusha
+                push ds
+                push cs
                 push es
-
-                mov ax, 0b800h
-                mov es, ax
-
-                mov ah, 4eh
+                push ss
 
                 in al, 60h  
 
@@ -69,7 +66,7 @@ F12_button_unpress:
                 cmp cs:[F12_press_status], 0
                 je end_F12_button
 
-                call PrintOldSymbols
+                ;call PrintOldSymbols
 
                 mov byte ptr cs:[F12_press_status], 0
 
@@ -83,10 +80,11 @@ end_F12_button:
                 mov al, 20h
                 out 20h, al
 
+                pop ss
                 pop es
-                pop cx
-                pop di
-                pop ax
+                pop ds
+                pop ds
+                popa
 
                 db 0eah
 old09off        dw 0
@@ -99,97 +97,130 @@ old_sym                   dw 0
 F12_press_status          dw 0
 
 ;-----------------------------------------------------------------------
-;Выводит на экран значение всех регистров
-;Принимает:  di - адрес откуда в столбик начнуть печататься регстры, 
-;Портит:     di
+; Вывод на экран содержимого регистров переданных через стек
+; Принимает:  
+;             1 - ip - 30
+;             2 - ax - 28
+;             3 - dx - 26
+;             4 - bx - 24
+;             5 - sp - 22
+;             6 - bp - 20
+;             2 - cx - 18
+;             7 - si - 16
+;             8 - di - 14
+;             9 - ds - 12
+;             10 - cs - 10
+;             11 - es - 6
+;             12 - ss - 4
+; Возвращает: -
 ;-----------------------------------------------------------------------
 PrintRegs       proc
 
-                push di
+                push bp
+                mov bp, sp
+                
+                mov ax, video_seg
+                mov es, ax
 
                 mov di, centre_offset
+                mov ax, ss:[bp + 26]
+
+                call PrintOneReg
+
+                pop bp
+
+                ret
+                endp
+
+;-----------------------------------------------------------------------
+; Вывод на указанной позиции es:di 4 байта переданные через регистр ax
+; Принимает:  ax - 4 байта которые выведуться на экран
+;             di - адрес в видеопамяти куда нарисовать эти 4 байта
+;             bx - имя регистра
+; Портит:
+;-----------------------------------------------------------------------
+PrintOneReg     proc
+
+
                 push di
-                call PrintRegAx
+                push ax             ; сохраняем исходное значение регистра ax - 1234
+
+                xor ax, ax
+                mov al, 41h
+                mov byte ptr es:[di], al
+                mov byte ptr es:[di + 1], color
+                add di, 2
+
+                xor ax, ax
+                mov al, 58h
+                mov byte ptr es:[di], al
+                mov byte ptr es:[di + 1], color
+                add di, 2
+
+                xor ax, ax
+                mov al, 0
+                mov byte ptr es:[di], al
+                mov byte ptr es:[di + 1], color
+
+                add di, 2
+
+                xor ax, ax
+                mov al, 3dh
+                mov byte ptr es:[di], al
+                mov byte ptr es:[di + 1], color
+                add di, 2
+
+                xor ax, ax
+                mov al, 0
+                mov byte ptr es:[di], al
+                mov byte ptr es:[di + 1], color
+
+                add di, 2
+                
+                pop ax
+                push ax
+
+                shr ax, 12           ; получаем цифру 0001
+
+                call PrintSym
+
+                pop ax
+                push ax             ; сохраняем исходное значение регистра ax - 1234
+
+                shl ax, 4
+                shr ax, 12          ; получаем цифру 0002
+
+                add di, 2
+                call PrintSym
+
+                pop ax
+                push ax             ; сохраняем исходное значение регистра ax - 1234
+
+                shl ax, 8
+                shr ax, 12          ; получаем цифру 0003
+
+                add di, 2
+                call PrintSym
+
+                pop ax
+
+                shl ax, 12
+                shr ax, 12          ; получаем цифру 0004
+
+                add di, 2
+                call PrintSym
 
                 pop di
 
                 ret
                 endp
 
-;--------------------------Pascal---------------------------------------
-;Выведет по указанному адресу es:di в видео память четыре числа характерные 4 байтам регистра AX
-;Принимает:  1 - адрес откуда начать выводить регистр AX, 
 ;-----------------------------------------------------------------------
-
-PrintRegAx      proc
-
-                push bp
-                mov bp, sp
-
-                push di
-                mov di, [bp + 4]
-
-                push ax             ;сохраняем исходное значение регистра ax - 1234
-
-                shr ax, 12           ;Получаем вид 0001
-
-                push di
-                push ax
-                call PrintSym
-
-                pop ax
-                push ax             ;сохраняем исходное значение регистра ax - 1234
-
-                shl ax, 4
-                shr ax, 12          ;Получаем вид 0002
-
-                add di, 2
-                push di
-                push ax
-                call PrintSym
-
-                pop ax
-                push ax             ;сохраняем исходное значение регистра ax - 1234
-
-                shl ax, 8
-                shr ax, 12          ;Получаем вид 0003
-
-                add di, 2
-                push di
-                push ax
-                call PrintSym
-
-                pop ax
-
-                shl ax, 12
-                shr ax, 12          ;Получаем вид 0004
-
-                add di, 2
-                push di
-                push ax
-                call PrintSym
-
-                pop di
-                pop bp
-
-                ret 2
-                endp
-
-;-------------------------------Pascal------------------------------------
-;Выведет по указанному адресу es:di в видео память четыре числа характерные 4 байтам регистра AX
-;Принимает:  1 - адрес куда выводить элемент
-;            2 - сам символ для вывода
+; Вывод на указанной позиции es:di в текстовый видеобуфер символа (цифры) младшего полубайта числа
+; Принимает:  di - адрес куда выводить символ
+;             ax - сам символ (число для вывода)
 ;-----------------------------------------------------------------------
 PrintSym        proc
-
-                push bp
-                mov bp, sp
-
-                push di
-                push ax
-
-                mov ax, [bp + 4]
-                mov di, [bp + 6]
 
                 cmp ax, 10
                 jl parse_digit
@@ -198,15 +229,12 @@ PrintSym        proc
                 jmp end_parse
 
 parse_digit:    add al, '0'
+
 end_parse:
                 mov byte ptr es:[di], al
                 mov byte ptr es:[di + 1], color
 
-                pop ax
-                pop di
-                pop bp
-
-                ret 4
+                ret
                 endp
 
 
