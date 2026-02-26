@@ -5,6 +5,7 @@
 org 100h
 
 centre_offset             equ 5 * 160 + 80
+one_line_len              equ 160
 F12_scancode_press        equ 58h
 F12_scancode_unpress      equ 58h + 80h 
 color                     equ 0ah  
@@ -30,6 +31,7 @@ Start:          mov ax, 3509h
                 shr dx, 4
                 inc dx
 
+                ;call My09IntFunc
                 int 21h
 
 My09IntFunc     proc
@@ -39,6 +41,8 @@ My09IntFunc     proc
                 push cs
                 push es
                 push ss
+
+                ;call PrintRegs
 
                 in al, 60h  
 
@@ -99,20 +103,20 @@ F12_press_status          dw 0
 ;-----------------------------------------------------------------------
 ; Вывод на экран содержимого регистров переданных через стек
 ; Принимает:  
-;             1 - ip - 30
-;             2 - ax - 28
-;             3 - dx - 26
-;             4 - bx - 24
-;             5 - sp - 22
-;             6 - bp - 20
-;             2 - cx - 18
-;             7 - si - 16
-;             8 - di - 14
-;             9 - ds - 12
-;             10 - cs - 10
-;             11 - es - 6
-;             12 - ss - 4
-; Возвращает: -
+;             1 - ip - 28
+;             2 - ax - 26
+;             3 - cx - 24
+;             4 - dx - 22
+;             5 - bx - 20
+;             6 - sp - 18
+;             7 - bp - 16
+;             8 - si - 14
+;             9 - di - 12
+;             10 - ds - 10
+;             11 - cs - 8
+;             12 - es - 6
+;             13 - ss - 4
+; Портит: cx, ax, di, bx
 ;-----------------------------------------------------------------------
 PrintRegs       proc
 
@@ -123,9 +127,22 @@ PrintRegs       proc
                 mov es, ax
 
                 mov di, centre_offset
-                mov ax, ss:[bp + 26]
+                mov cx, 28
+                mov bx, offset RegsNames
+
+loop_1:
+                add bp, cx
+                mov ax, ss:[bp]
+                sub bp, cx
 
                 call PrintOneReg
+
+                add bx, 2
+                add di, one_line_len
+                sub cx, 2
+
+                cmp cx, 2
+                ja loop_1
 
                 pop bp
 
@@ -143,36 +160,29 @@ PrintOneReg     proc
 
 
                 push di
+                push cx
                 push ax             ; сохраняем исходное значение регистра ax - 1234
 
-                xor ax, ax
-                mov al, 41h
-                mov byte ptr es:[di], al
+                mov cl, cs:[bx]
+                mov byte ptr es:[di], cl
                 mov byte ptr es:[di + 1], color
                 add di, 2
 
-                xor ax, ax
-                mov al, 58h
-                mov byte ptr es:[di], al
+                mov cl, cs:[bx + 1]
+                mov byte ptr es:[di], cl
                 mov byte ptr es:[di + 1], color
                 add di, 2
 
-                xor ax, ax
-                mov al, 0
-                mov byte ptr es:[di], al
+                mov byte ptr es:[di], 0
                 mov byte ptr es:[di + 1], color
 
                 add di, 2
 
-                xor ax, ax
-                mov al, 3dh
-                mov byte ptr es:[di], al
+                mov byte ptr es:[di], 3dh
                 mov byte ptr es:[di + 1], color
                 add di, 2
 
-                xor ax, ax
-                mov al, 0
-                mov byte ptr es:[di], al
+                mov byte ptr es:[di], 0
                 mov byte ptr es:[di + 1], color
 
                 add di, 2
@@ -210,6 +220,7 @@ PrintOneReg     proc
                 add di, 2
                 call PrintSym
 
+                pop cx
                 pop di
 
                 ret
@@ -258,5 +269,8 @@ PrintOldSymbols proc
                 ret
                 endp
 
+RegsNames       db "IPAXCXDXBXSPBPSIDIDSCSESSS"
 EOP:
+
+
 end Start
