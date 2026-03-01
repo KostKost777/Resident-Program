@@ -8,7 +8,9 @@ one_line_len              equ 160
 F12_scancode_press        equ 58h
 F12_scancode_unpress      equ 58h + 80h 
 color                     equ 0ah  
-video_seg                 equ 0b800h      
+video_seg                 equ 0b800h
+equal_sign                equ 3dh
+whitespace               equ 0h
 
 Start:          mov ax, 3509h
                 int 21h
@@ -102,6 +104,8 @@ F12_button_press:
                 je F12_second_press
 
                 call PrintRegs                              ;первое нажатие клавиши f12
+                call PrintFlags
+
                 mov byte ptr cs:[F12_press_status], 1
 
                 jmp end_F12_button
@@ -134,16 +138,16 @@ old09seg        dw 0
                 endp
 
 ;-----------------------------------------------------------------------
-; Процедура вывода на экран значений регистров в момент нажатия клавиши
+; Процедура вывода значений регистров в момент нажатия клавиши
 ; Смещения в стеке:
-;             1  - ip    - 30
+;             1  - flags - 30
 ;             2  - cs    - 28
-;             3  - flags - 26
+;             3  - ip    - 26
 ;             4  - ax    - 24
 ;             5  - cx    - 22
 ;             6  - dx    - 20
 ;             7  - bx    - 18
-;             8  - sp    - 16
+;             8  - sp    - 16           
 ;             9  - bp    - 14
 ;             10 - si    - 12
 ;             11 - di    - 10
@@ -151,7 +155,7 @@ old09seg        dw 0
 ;             13 - es    - 6
 ;             14 - ss    - 4
 ;
-; Использует: cx, ax, di, bx
+; Портятся: cx, ax, di, bx
 ;-----------------------------------------------------------------------
 PrintRegs       proc
 
@@ -161,15 +165,20 @@ PrintRegs       proc
                 mov ax, video_seg
                 mov es, ax
 
-                mov di, centre_offset
-                mov cx, 24
+                mov di, centre_offset               ; начальное значение di
+                mov cx, 28                          ; смещение наибольшего регистра в стеке
                 mov bx, offset regs_names
 
 loop_1:
                 add bp, cx
-                mov ax, ss:[bp]
+                mov ax, ss:[bp]      
                 sub bp, cx
 
+                cmp cx, 16          ; смещение регистра sp
+                jne not_reg_sp
+                add ax, 6           ; так как в cтек пушится еще и flags, ip, cs
+
+not_reg_sp:
                 call PrintOneReg
 
                 add bx, 2
@@ -185,11 +194,109 @@ loop_1:
                 endp
 
 ;-----------------------------------------------------------------------
-; Процедура вывода в видеопамять es:di 4 символов названия регистра и значения ax
-; Входные данные:  ax - 4 байтное значение для вывода на экран
-;                   di - позиция в видеопамяти для вывода на 4 символа
-;                   bx - указатель на название
-; Выходные данные:
+; Процедура вывода в видеопамять es:di имя флага и его значение
+; Входные данные:  -
+; Выходные данные: -
+; Портит: bx
+;-----------------------------------------------------------------------
+PrintFlags      proc
+
+                push bp
+                mov bp, sp
+
+                add bp, 30
+                mov ax, ss:[bp]
+                sub bp, 30
+
+                [ ][ ][ ][ ][OF][DF][IF][TF][SF][ZF][ ][AF][ ][PF][1][CF]
+
+                push ax
+                push 1b
+                call GetFlagStatus
+
+                mov dx, "CF"
+                call PrintOneFlag
+
+                pop bp
+                ret
+                endp
+
+;-----------------------------------------------------------------------
+; Выводит имя флага и его значение через знак равенства
+; Входные данные:  dx - имя флага
+;                  bx - значение флага
+;                  di - адрес в видео памяти
+;
+; Выходные данные: -
+; Портит: 
+;-----------------------------------------------------------------------
+PrintOneFlag    proc
+
+                push cx
+
+                mov ch, color
+
+                mov cl, dh
+                call PrintSym
+
+                mov cl, dh
+                call PrintSym
+
+                mov cl, whitespace
+                call PrintSym
+
+                mov cl, equal_sign
+                call PrintSym
+
+                mov cl, dh
+                call PrintSym
+
+
+                pop cx
+                ret
+                endp
+
+
+
+
+
+
+;-----------------------------------------------------------------------
+; Проверка совпадение переданного значением с переданной маской
+; Входные данные:  1 - значение
+;                  2 - маска
+; Выходные данные: bx - совпало/не совпало (1/0)
+; Портит: ax, bx
+;-----------------------------------------------------------------------
+GetFlagStatus   proc
+
+                push bp
+                mov bp, sp
+
+                mov ax, ss:[bp + 6]
+                
+                test ax, ss:[bp + 4]
+                jnz equal_bit:
+
+                mov bx, 0h
+
+                pop bp
+                ret
+
+equal_bit:
+                mov bx, 1h
+
+                pop bp
+                ret
+
+                endp
+                
+;-----------------------------------------------------------------------
+; Процедура вывода в видеопамять es:di имя регистра и его 4 байтное значение
+; Входные данные:   ax - 4 байтное значение для вывода на экран
+;                   di - позиция в видеопамяти для вывода
+;                   bx - указатель на имя регистра
+; Выходные данные: -
 ;-----------------------------------------------------------------------
 PrintOneReg     proc
 
@@ -198,36 +305,14 @@ PrintOneReg     proc
                 push cx
                 push ax             ; сохраняем выводимое значение регистра ax - 1234
 
-                mov cl, cs:[bx]
-                mov byte ptr es:[di], cl
-                mov byte ptr es:[di + 1], color
-                add di, 2
+                call PrintRegName
 
-                mov cl, cs:[bx + 1]
-                mov byte ptr es:[di], cl
-                mov byte ptr es:[di + 1], color
-                add di, 2
-
-                mov byte ptr es:[di], 0
-                mov byte ptr es:[di + 1], color
-
-                add di, 2
-
-                mov byte ptr es:[di], 3dh
-                mov byte ptr es:[di + 1], color
-                add di, 2
-
-                mov byte ptr es:[di], 0
-                mov byte ptr es:[di + 1], color
-
-                add di, 2
-                
                 pop ax
                 push ax
 
                 shr ax, 12           ; получаем первую цифру 0001
 
-                call PrintSym
+                call PrintHexDigit
 
                 pop ax
                 push ax             ; сохраняем выводимое значение регистра ax - 1234
@@ -236,7 +321,7 @@ PrintOneReg     proc
                 shr ax, 12          ; получаем вторую цифру 0002
 
                 add di, 2
-                call PrintSym
+                call PrintHexDigit
 
                 pop ax
                 push ax             ; сохраняем выводимое значение регистра ax - 1234
@@ -245,7 +330,7 @@ PrintOneReg     proc
                 shr ax, 12          ; получаем третью цифру 0003
 
                 add di, 2
-                call PrintSym
+                call PrintHexDigit
 
                 pop ax
 
@@ -253,10 +338,56 @@ PrintOneReg     proc
                 shr ax, 12          ; получаем четвертую цифру 0004
 
                 add di, 2
-                call PrintSym
+                call PrintHexDigit
 
                 pop cx
                 pop di
+
+                ret
+                endp
+
+;-----------------------------------------------------------------------
+; Процедура вывода в видеопамять es:di Название регистра и знак равенства "XX = "
+; Входные данные:  di - адрес для вывода символа в видеопамять
+;                  bx - указатель на название регистра
+; Портит: cx
+;-----------------------------------------------------------------------
+PrintRegName    proc
+
+                mov ch, color
+
+                mov cl, cs:[bx]
+                call PrintSym
+
+                mov cl, cs:[bx + 1]
+                call PrintSym
+
+                mov cl, whitespace
+                call PrintSym
+
+                mov cl, equal_sign 
+                call PrintSym
+
+                mov cl, whitespace
+                call PrintSym
+
+                ret
+                endp
+
+;-----------------------------------------------------------------------
+; Процедура вывода в видеопамять es:di символа лежащего в cl
+; Входные данные:  di - позиция для вывода символа
+;                  cl - символ
+;                  ch - цвет символа
+;
+;Портит: di
+;-----------------------------------------------------------------------
+PrintSym        proc
+
+                mov byte ptr es:[di], cl
+                inc di
+                mov byte ptr es:[di], ch
+                inc di
 
                 ret
                 endp
@@ -266,7 +397,7 @@ PrintOneReg     proc
 ; Входные данные:  di - позиция для вывода символа
 ;                  ax - номер символа (цифра для вывода)
 ;-----------------------------------------------------------------------
-PrintSym        proc
+PrintHexDigit   proc
 
                 cmp ax, 10
                 jl parse_digit
@@ -304,8 +435,8 @@ PrintOldSymbols proc
                 ret
                 endp
 
+regs_names                db "CSIPAXCXDXBXSPBPSIDIDSESSS"
 video_buffer              db 160 dup (?)
-regs_names                db "AXCXDXBXSPBPSIDIDSCSESSS"
 F12_press_status          db 0
 
 EOP:
