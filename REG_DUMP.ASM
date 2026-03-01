@@ -10,7 +10,8 @@ F12_scancode_unpress      equ 58h + 80h
 color                     equ 0ah  
 video_seg                 equ 0b800h
 equal_sign                equ 3dh
-whitespace               equ 0h
+whitespace                equ 0h
+flags_offset              equ 5 * 160 + 80 + 22
 
 Start:          mov ax, 3509h
                 int 21h
@@ -62,7 +63,9 @@ My08IntFunc     proc
                 cmp cs:[F12_press_status], 0
                 je F12_unpress
 
+               
                 call PrintRegs
+                call PrintFlags
 
 F12_unpress:
                 pop ss
@@ -103,8 +106,10 @@ F12_button_press:
                 cmp cs:[F12_press_status], 1
                 je F12_second_press
 
+                
                 call PrintRegs                              ;первое нажатие клавиши f12
                 call PrintFlags
+                
 
                 mov byte ptr cs:[F12_press_status], 1
 
@@ -195,27 +200,101 @@ not_reg_sp:
 
 ;-----------------------------------------------------------------------
 ; Процедура вывода в видеопамять es:di имя флага и его значение
-; Входные данные:  -
+; Входные данные:  по сдвигу 30 должно лежать 16-ричное число с информацие о флагах
 ; Выходные данные: -
-; Портит: bx
+; Портит: bx, di
 ;-----------------------------------------------------------------------
 PrintFlags      proc
 
                 push bp
                 mov bp, sp
 
-                add bp, 30
-                mov ax, ss:[bp]
-                sub bp, 30
+                mov di, flags_offset
 
-                [ ][ ][ ][ ][OF][DF][IF][TF][SF][ZF][ ][AF][ ][PF][1][CF]
+                mov ax, ss:[bp + 30]
+
+               ; [ ][ ][ ][ ][OF][DF][IF][TF][SF][ZF][ ][AF][ ][PF][1][CF]
 
                 push ax
-                push 1b
+                push 1
                 call GetFlagStatus
 
                 mov dx, "CF"
                 call PrintOneFlag
+
+                add di, one_line_len
+
+                push ax
+                push 4
+                call GetFlagStatus
+
+                mov dx, "PF"
+                call PrintOneFlag
+
+                add di, one_line_len
+
+                push ax
+                push 16
+                call GetFlagStatus
+
+                mov dx, "AF"
+                call PrintOneFlag
+
+                add di, one_line_len
+
+                push ax
+                push 64
+                call GetFlagStatus
+
+                mov dx, "ZF"
+                call PrintOneFlag
+
+                add di, one_line_len
+
+                push ax
+                push 128
+                call GetFlagStatus
+
+                mov dx, "SF"
+                call PrintOneFlag
+
+                add di, one_line_len
+
+                push ax
+                push 256
+                call GetFlagStatus
+
+                mov dx, "TF"
+                call PrintOneFlag
+
+                add di, one_line_len
+
+                push ax
+                push 512
+                call GetFlagStatus
+
+                mov dx, "IF"
+                call PrintOneFlag
+
+                add di, one_line_len
+
+                push ax
+                push 1024
+                call GetFlagStatus
+
+                mov dx, "DF"
+                call PrintOneFlag
+
+                add di, one_line_len
+
+                push ax
+                push 2048
+                call GetFlagStatus
+
+                mov dx, "OF"
+                call PrintOneFlag
+
+                add di, one_line_len
 
                 pop bp
                 ret
@@ -233,13 +312,14 @@ PrintFlags      proc
 PrintOneFlag    proc
 
                 push cx
+                push di
 
                 mov ch, color
 
                 mov cl, dh
                 call PrintSym
 
-                mov cl, dh
+                mov cl, dl
                 call PrintSym
 
                 mov cl, whitespace
@@ -248,18 +328,18 @@ PrintOneFlag    proc
                 mov cl, equal_sign
                 call PrintSym
 
-                mov cl, dh
+                mov cl, whitespace
                 call PrintSym
 
+                mov cl, bl
+                call PrintSym
 
+                pop di
                 pop cx
+
                 ret
+
                 endp
-
-
-
-
-
 
 ;-----------------------------------------------------------------------
 ; Проверка совпадение переданного значением с переданной маской
@@ -276,18 +356,18 @@ GetFlagStatus   proc
                 mov ax, ss:[bp + 6]
                 
                 test ax, ss:[bp + 4]
-                jnz equal_bit:
+                jnz equal_bit
 
-                mov bx, 0h
+                mov bl, '0'
 
                 pop bp
-                ret
+                ret 4
 
 equal_bit:
-                mov bx, 1h
+                mov bl, '1'
 
                 pop bp
-                ret
+                ret 4
 
                 endp
                 
@@ -300,9 +380,9 @@ equal_bit:
 ;-----------------------------------------------------------------------
 PrintOneReg     proc
 
-
                 push di
                 push cx
+
                 push ax             ; сохраняем выводимое значение регистра ax - 1234
 
                 call PrintRegName
@@ -413,7 +493,6 @@ end_parse:
 
                 ret
                 endp
-
 
 PrintOldSymbols proc
 
