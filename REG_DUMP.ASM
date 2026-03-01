@@ -12,6 +12,8 @@ video_seg                 equ 0b800h
 equal_sign                equ 3dh
 whitespace                equ 0h
 flags_offset              equ 5 * 160 + 80 + 22
+buffer_width              equ 34
+buffer_length             equ 26
 
 Start:          mov ax, 3509h
                 int 21h
@@ -106,7 +108,7 @@ F12_button_press:
                 cmp cs:[F12_press_status], 1
                 je F12_second_press
 
-                
+                call SaveOldSym 
                 call PrintRegs                              ;первое нажатие клавиши f12
                 call PrintFlags
                 
@@ -117,7 +119,7 @@ F12_button_press:
 
 F12_second_press:
 
-                ;call PrintOldSymbols                        ;второе нажатие f12
+                call PrintOldSyms                           ;второе нажатие f12
                 mov byte ptr cs:[F12_press_status], 0
 
 end_F12_button:
@@ -212,8 +214,6 @@ PrintFlags      proc
                 mov di, flags_offset
 
                 mov ax, ss:[bp + 30]
-
-               ; [ ][ ][ ][ ][OF][DF][IF][TF][SF][ZF][ ][AF][ ][PF][1][CF]
 
                 push ax
                 push 1
@@ -494,28 +494,91 @@ end_parse:
                 ret
                 endp
 
-PrintOldSymbols proc
+;-----------------------------------------------------------------------
+; Процедура сохраняет байты из видеопамяти в буффер, чтобы потом можно было его восстановить 
+; Входные данные: -
+; Выходные данные: -
+; Портит: di, cx, si, ax, bx
+;-----------------------------------------------------------------------
+SaveOldSym      proc
 
-                push di
-
+                mov ax, video_seg
+                mov es, ax
                 mov di, centre_offset
+                xor cx, cx
+                mov si, offset video_buffer
+                mov bx, buffer_width
+                
 
-                mov byte ptr es:[di], 20h
-                mov byte ptr es:[di + 1], 0h
-                mov byte ptr es:[di + 2], 20h
-                mov byte ptr es:[di + 3], 0h
-                mov byte ptr es:[di + 4], 20h
-                mov byte ptr es:[di + 5], 0h
-                mov byte ptr es:[di + 6], 20h
-                mov byte ptr es:[di + 7], 0h
+save_sym_loop:
+                cmp cx, buffer_length * buffer_width
+                ja end_save_loop
 
-                pop di
+                mov byte ptr al, es:[di]
+                mov byte ptr cs:[si], al
+
+                inc si
+                inc di
+                inc cx
+
+                cmp bx, cx
+                jne save_sym_loop
+
+                sub di, buffer_width
+                add di, one_line_len
+
+                add bx, buffer_width
+
+                jmp save_sym_loop
+
+end_save_loop:
+
+                ret
+                endp
+
+;-----------------------------------------------------------------------
+; Процедура выводит на экран сохранившиеся биты по адресу в код сегменте
+; Входные данные: -
+; Выходные данные: -
+; Портит: di, cx, si, ax, bx, es
+;-----------------------------------------------------------------------
+PrintOldSyms    proc
+
+                mov ax, video_seg
+                mov es, ax
+                mov di, centre_offset
+                xor cx, cx
+                mov si, offset video_buffer
+                mov bx, buffer_width
+
+print_old_sym_loop:
+                cmp cx, buffer_length * buffer_width
+                ja end_print_old_loop
+
+                mov byte ptr al, cs:[si]
+                mov byte ptr es:[di], al
+
+                inc si
+                inc di
+                inc cx
+
+                cmp bx, cx
+                jne print_old_sym_loop
+
+                sub di, buffer_width
+                add di, one_line_len
+
+                add bx, buffer_width
+
+                jmp print_old_sym_loop
+
+end_print_old_loop:
 
                 ret
                 endp
 
 regs_names                db "CSIPAXCXDXBXSPBPSIDIDSESSS"
-video_buffer              db 160 dup (?)
+video_buffer              db (buffer_width * buffer_length) dup (?)
 F12_press_status          db 0
 
 EOP:
