@@ -15,6 +15,8 @@ whitespace                equ 0h
 flags_offset              equ 5 * 160 + 80 + 20
 buffer_width              equ 38
 buffer_length             equ 15
+save_page_offset          equ 1000h
+draw_page_offset          equ 2000h
 
 left_up                   equ 0c9h     
 hor_line                  equ 0cdh
@@ -76,9 +78,14 @@ My08IntFunc     proc
                 mov ax, video_seg
                 mov es, ax
 
-                call PrintRamka
-                call PrintRegs
-                call PrintFlags
+                call CompareBufs
+
+                call FillDrawBufRegs
+                call FillDrawBufFlags
+
+                mov si, ramka_offset + draw_page_offset
+                mov di, ramka_offset
+                call CopyBufs
 
 F12_unpress:
                 pop ss
@@ -122,11 +129,17 @@ F12_button_press:
                 mov ax, video_seg
                 mov es, ax
 
-                call SaveOldSym
-                call PrintRamka
-                call PrintRegs                              ;первое нажатие клавиши f12
-                call PrintFlags
-                
+                mov si, ramka_offset
+                mov di, ramka_offset + save_page_offset
+                call CopyBufs
+
+                call FillDrawBufRamka
+                call FillDrawBufRegs                      ;первое нажатие клавиши f12
+                call FillDrawBufFlags
+
+                mov si, ramka_offset + draw_page_offset
+                mov di, ramka_offset
+                call CopyBufs
 
                 mov byte ptr cs:[F12_press_status], 1
 
@@ -137,7 +150,10 @@ F12_second_press:
                 mov ax, video_seg
                 mov es, ax
 
-                call PrintOldSyms                           ;второе нажатие f12
+                mov si, ramka_offset + save_page_offset
+                mov di, ramka_offset 
+                call CopyBufs
+                
                 mov byte ptr cs:[F12_press_status], 0
 
 end_F12_button:
@@ -182,16 +198,13 @@ old09seg        dw 0
 ;
 ; Портятся: cx, ax, di, bx
 ;-----------------------------------------------------------------------
-PrintRegs       proc
+FillDrawBufRegs proc
 
                 push bp
                 mov bp, sp
-                
-                mov ax, video_seg
-                mov es, ax
 
-                mov di, centre_offset               ; начальное значение di
-                mov cx, 28                          ; смещение наибольшего регистра в стеке
+                mov di, centre_offset + draw_page_offset               ; начальное значение di
+                mov cx, 28                                      ; смещение наибольшего регистра в стеке
                 mov bx, offset regs_names
 
 loop_1:
@@ -224,12 +237,12 @@ not_reg_sp:
 ; Выходные данные: -
 ; Портит: bx, di
 ;-----------------------------------------------------------------------
-PrintFlags      proc
+FillDrawBufFlags      proc
 
                 push bp
                 mov bp, sp
 
-                mov di, flags_offset
+                mov di, flags_offset + draw_page_offset
 
                 mov ax, ss:[bp + 30]
 
@@ -513,25 +526,23 @@ end_parse:
                 endp
 
 ;-----------------------------------------------------------------------
-; Процедура сохраняет байты из видеопамяти в буффер, чтобы потом можно было его восстановить 
+; Процедура копирует данные со строницы с адресом si, в страницу с адресом di
 ; Входные данные: -
 ; Выходные данные: -
 ; Необходимо: es - смещение первой страницы видеопамяти
 ; Портит: di, cx, si, ax, bx
 ;-----------------------------------------------------------------------
-SaveOldSym      proc
+CopyBufs        proc
 
-                mov di, ramka_offset
                 xor cx, cx
-                mov si, offset video_buffer
                 mov bx, buffer_width
                 
 save_sym_loop:
                 cmp cx, buffer_length * buffer_width
                 ja end_save_loop
 
-                mov byte ptr al, es:[di]
-                mov byte ptr cs:[si], al
+                mov byte ptr al, es:[si]
+                mov byte ptr es:[di], al
 
                 inc si
                 inc di
@@ -542,6 +553,9 @@ save_sym_loop:
 
                 sub di, buffer_width
                 add di, one_line_len
+
+                sub si, buffer_width
+                add si, one_line_len
 
                 add bx, buffer_width
 
@@ -559,9 +573,9 @@ end_save_loop:
 ; Необходимо: es - смещение первой страницы видеопамяти
 ; Портит: di, ax, cx, bx
 ;-----------------------------------------------------------------------
-PrintRamka      proc
+FillDrawBufRamka      proc
 
-                mov di, ramka_offset
+                mov di, ramka_offset + draw_page_offset
 
                 mov ah, color
                 mov cx, buffer_width
@@ -620,53 +634,65 @@ ramka_line_loop:
 
                 mov al, right_down
                 mov es:[di], ax
-                add di, 2               ; вывели нижнию границу
+                add di, 2                    ; вывели нижнию границу
                 
                 ret
                 endp
 
 ;-----------------------------------------------------------------------
-; Процедура выводит на экран сохранившиеся биты по адресу в код сегменте
+; Сравнивает draw_buf и video_buf, если есть расхождение меняет данные в save_buf
 ; Входные данные: -
 ; Выходные данные: -
 ; Необходимо: es - смещение первой страницы видеопамяти
-; Портит: di, cx, si, ax, bx, es
+; Портит: di, ax, cx, bx
 ;-----------------------------------------------------------------------
-PrintOldSyms    proc
+CompareBufs     proc
 
                 mov di, ramka_offset
+                mov si, ramka_offset + draw_page_offset
+
                 xor cx, cx
-                mov si, offset video_buffer
                 mov bx, buffer_width
-
-print_old_sym_loop:
+                
+compare_loop:
                 cmp cx, buffer_length * buffer_width
-                ja end_print_old_loop
+                ja end_compare_loop
 
-                mov byte ptr al, cs:[si]
-                mov byte ptr es:[di], al
+                mov byte ptr al, es:[di]
 
+                cmp al, byte ptr es:[si]
+                je byte_match
+
+                sub si, draw_page_offset
+                add si, save_page_offset
+                mov es:[si], al
+                sub si, save_page_offset
+                add si, draw_page_offset
+
+byte_match:
                 inc si
                 inc di
                 inc cx
 
                 cmp bx, cx
-                jne print_old_sym_loop
+                jne compare_loop
 
                 sub di, buffer_width
                 add di, one_line_len
 
+                sub si, buffer_width
+                add si, one_line_len
+
                 add bx, buffer_width
 
-                jmp print_old_sym_loop
+                jmp compare_loop
 
-end_print_old_loop:
+end_compare_loop:
 
                 ret
                 endp
 
 regs_names                db "CSIPAXCXDXBXSPBPSIDIDSESSS"
-video_buffer              db (buffer_width * buffer_length) dup (?)
 F12_press_status          db 0
 
 EOP:
