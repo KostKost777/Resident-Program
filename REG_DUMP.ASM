@@ -4,6 +4,7 @@
 org 100h
 
 centre_offset             equ 5 * 160 + 80
+ramka_offset              equ 4 * 160 + 80 - 4
 one_line_len              equ 160
 F12_scancode_press        equ 58h
 F12_scancode_unpress      equ 58h + 80h 
@@ -11,9 +12,16 @@ color                     equ 0ah
 video_seg                 equ 0b800h
 equal_sign                equ 3dh
 whitespace                equ 0h
-flags_offset              equ 5 * 160 + 80 + 22
-buffer_width              equ 34
-buffer_length             equ 26
+flags_offset              equ 5 * 160 + 80 + 20
+buffer_width              equ 38
+buffer_length             equ 15
+
+left_up                   equ 0c9h     
+hor_line                  equ 0cdh
+right_up                  equ 0bbh
+ver_line                  equ 0bah
+right_down                equ 0bch
+left_down                 equ 0c8h
 
 Start:          mov ax, 3509h
                 int 21h
@@ -65,7 +73,10 @@ My08IntFunc     proc
                 cmp cs:[F12_press_status], 0
                 je F12_unpress
 
-               
+                mov ax, video_seg
+                mov es, ax
+
+                call PrintRamka
                 call PrintRegs
                 call PrintFlags
 
@@ -108,7 +119,11 @@ F12_button_press:
                 cmp cs:[F12_press_status], 1
                 je F12_second_press
 
-                call SaveOldSym 
+                mov ax, video_seg
+                mov es, ax
+
+                call SaveOldSym
+                call PrintRamka
                 call PrintRegs                              ;первое нажатие клавиши f12
                 call PrintFlags
                 
@@ -118,6 +133,9 @@ F12_button_press:
                 jmp end_F12_button
 
 F12_second_press:
+
+                mov ax, video_seg
+                mov es, ax
 
                 call PrintOldSyms                           ;второе нажатие f12
                 mov byte ptr cs:[F12_press_status], 0
@@ -498,18 +516,16 @@ end_parse:
 ; Процедура сохраняет байты из видеопамяти в буффер, чтобы потом можно было его восстановить 
 ; Входные данные: -
 ; Выходные данные: -
+; Необходимо: es - смещение первой страницы видеопамяти
 ; Портит: di, cx, si, ax, bx
 ;-----------------------------------------------------------------------
 SaveOldSym      proc
 
-                mov ax, video_seg
-                mov es, ax
-                mov di, centre_offset
+                mov di, ramka_offset
                 xor cx, cx
                 mov si, offset video_buffer
                 mov bx, buffer_width
                 
-
 save_sym_loop:
                 cmp cx, buffer_length * buffer_width
                 ja end_save_loop
@@ -537,16 +553,88 @@ end_save_loop:
                 endp
 
 ;-----------------------------------------------------------------------
+; Выводит красивую рамочку, левый верхний угол лежит в di
+; Входные данные: -
+; Выходные данные: -
+; Необходимо: es - смещение первой страницы видеопамяти
+; Портит: di, ax, cx, bx
+;-----------------------------------------------------------------------
+PrintRamka      proc
+
+                mov di, ramka_offset
+
+                mov ah, color
+                mov cx, buffer_width
+                shr cx, 1
+                sub cx, 2
+
+                mov al, left_up
+                mov es:[di], ax
+                add di, 2
+
+                mov al, hor_line
+                rep stosw
+
+                mov al, right_up
+                mov es:[di], ax
+                add di, 2               ; вывели верхнию границу
+
+                sub di, buffer_width     
+                add di, one_line_len
+                xor bx, bx
+
+ramka_line_loop:
+                mov al, ver_line
+                mov es:[di], ax
+                add di, 2
+
+                mov al, whitespace  
+                mov cx, buffer_width
+                shr cx, 1
+                sub cx, 2
+
+                rep stosw
+
+                mov al, ver_line
+                mov es:[di], ax
+                add di, 2
+
+                inc bx
+                sub di, buffer_width     
+                add di, one_line_len
+
+                cmp bx, buffer_length - 2
+                jne ramka_line_loop
+
+                mov cx, buffer_width
+                shr cx, 1
+                sub cx, 2
+
+                mov al, left_down
+                mov es:[di], ax
+                add di, 2
+
+                mov al, hor_line
+                mov es:[di], ax
+                rep stosw
+
+                mov al, right_down
+                mov es:[di], ax
+                add di, 2               ; вывели нижнию границу
+                
+                ret
+                endp
+
+;-----------------------------------------------------------------------
 ; Процедура выводит на экран сохранившиеся биты по адресу в код сегменте
 ; Входные данные: -
 ; Выходные данные: -
+; Необходимо: es - смещение первой страницы видеопамяти
 ; Портит: di, cx, si, ax, bx, es
 ;-----------------------------------------------------------------------
 PrintOldSyms    proc
 
-                mov ax, video_seg
-                mov es, ax
-                mov di, centre_offset
+                mov di, ramka_offset
                 xor cx, cx
                 mov si, offset video_buffer
                 mov bx, buffer_width
